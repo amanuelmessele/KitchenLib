@@ -35,7 +35,7 @@ nav button{flex:1;background:none;color:var(--mu);border-radius:0;padding:8px 2p
 <nav id="nav"></nav>
 <script>
 const $=s=>document.querySelector(s);
-let db={menu:[],orders:[],exp:[],cur:'ETB'};
+let db={menu:[],orders:[],exp:[],drivers:[],cur:'ETB'};
 try{const s=localStorage.getItem('kitchen_v1');if(s)db={...db,...JSON.parse(s)}}catch(e){}
 const save=()=>{try{localStorage.setItem('kitchen_v1',JSON.stringify(db))}catch(e){}};
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,5);
@@ -43,34 +43,43 @@ const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&g
 const money=n=>(Math.round(n*100)/100).toLocaleString()+' '+db.cur;
 const today=()=>new Date(Date.now()-new Date().getTimezoneOffset()*6e4).toISOString().slice(0,10);
 const calc=o=>{const it=o.items.reduce((a,i)=>a+i.p*i.q,0),fee=+o.fee||0,dc=+o.dc||0;return{it,fee,dc,rev:it+fee,pr:it+fee-dc}};
+const paidOf=o=>o.paidAmt!==undefined?(+o.paidAmt||0):(o.paid?calc(o).rev:0);
+const bal=o=>Math.max(0,calc(o).rev-paidOf(o));
 const itemsTxt=o=>o.items.map(i=>i.q+'x '+i.n).join(', ');
 const ds=n=>new Date(Date.now()-new Date().getTimezoneOffset()*6e4-n*864e5).toISOString().slice(0,10);
 const PRE=[['1','Today'],['7','7 days'],['30','30 days'],['m','This month'],['all','All']];
 const rng=k=>({'1':[ds(0),ds(0)],'7':[ds(6),ds(0)],'30':[ds(29),ds(0)],'m':[today().slice(0,8)+'01',ds(0)],'all':['','']})[k];
 const inR=(d,f,t)=>(!f||d>=f)&&(!t||d<=t);
 const plabel=()=>F.from||F.to?(F.from||'start')+' to '+(F.to||'today'):'all time';
-let tab='orders',flt='all',draft=null,sp='7',F={from:ds(6),to:ds(0),item:'',cust:'',paid:''};
+let tab='orders',flt='all',draft=null,sp='7',F={from:ds(6),to:ds(0),item:'',cust:'',paid:'',drv:''};
 
 function custs(){const m={};db.orders.filter(o=>o.st!='cancelled').forEach(o=>{const k=o.phone||o.name.toLowerCase();const c=m[k]||(m[k]={key:k,name:o.name,phone:o.phone,addr:o.addr,n:0,sum:0,last:''});c.n++;c.sum+=calc(o).rev;if(o.date>=c.last){c.last=o.date;c.name=o.name;c.addr=o.addr||c.addr}});return Object.values(m).sort((a,b)=>b.n-a.n||b.sum-a.sum)}
 
+const drivers=()=>[...new Set([...db.drivers,...db.orders.map(o=>o.drv)].filter(Boolean))].sort();
+function payFull(id){const o=db.orders.find(x=>x.id==id);o.paidAmt=calc(o).rev;o.paid=true;save();render()}
+function payAll(){$('#f_pa').value=calc({items:draft.items,fee:$('#f_fee').value,dc:$('#f_dc').value}).rev;upd()}
+function drvMgr(){return `<h3>Delivery persons</h3><div class="c"><div class="r"><input id="d_n" placeholder="Name"><button onclick="addD()">Add</button></div>${db.drivers.map((n,i)=>`<div class="r" style="padding:6px 0"><span>🛵 ${esc(n)}</span><button class="x" onclick="delD(${i})">✕</button></div>`).join('')}</div>`}
+function addD(){const n=$('#d_n').value.trim();if(!n)return;if(!db.drivers.includes(n))db.drivers.push(n);save();render()}
+function delD(i){if(confirm('Remove from the list? Past orders keep the name.')){db.drivers.splice(i,1);save();render()}}
+function setD(n){F.drv=n;render()}
 function render(){
  $('#nav').innerHTML=[['orders','📋','Orders'],['menu','🍲','Menu'],['spend','🧾','Spending'],['cust','👥','Customers'],['rep','📊','Reports']].map(([k,i,l])=>`<button class="${tab==k?'on':''}" onclick="tab='${k}';render()"><i>${i}</i>${l}</button>`).join('');
  $('#app').innerHTML=({orders:vOrders,menu:vMenu,spend:vSpend,cust:vCust,rep:vRep})[tab]();
 }
 function vOrders(){
- const f={all:()=>1,pending:o=>o.st=='pending',delivered:o=>o.st=='delivered',unpaid:o=>!o.paid&&o.st!='cancelled'}[flt];
+ const f={all:()=>1,pending:o=>o.st=='pending',delivered:o=>o.st=='delivered',unpaid:o=>bal(o)>0&&o.st!='cancelled'}[flt];
  const l=db.orders.filter(f).sort((a,b)=>(b.date+b.id).localeCompare(a.date+a.id));
  return `<h2>Orders</h2><div class="chips">${[['all','All'],['pending','To deliver'],['delivered','Delivered'],['unpaid','Unpaid']].map(([k,t])=>`<button class="${flt==k?'on':''}" onclick="flt='${k}';render()">${t}</button>`).join('')}</div>`+
  (l.length?l.map(o=>`<div class="c"><div class="r"><span class="b">${esc(o.name||'No name')}</span><span class="b">${money(calc(o).rev)}</span></div>
  <div class="m">${o.date} · ${o.phone?`<a href="tel:${esc(o.phone)}">${esc(o.phone)}</a>`:'no phone'}</div>
- <div class="m">📍 ${esc(o.addr||'-')}</div><div style="margin:6px 0">${esc(itemsTxt(o))}</div>${o.note?`<div class="m">📝 ${esc(o.note)}</div>`:''}
- <div class="r" style="margin-top:8px"><div><span class="t ${o.st=='delivered'?'ok':'no'}">${o.st}</span><span class="t ${o.paid?'ok':'no'}">${o.paid?'paid':'unpaid'}</span></div>
- <div style="display:flex;gap:6px">${o.st=='pending'?`<button class="g" onclick="setO('${o.id}','st','delivered')">Delivered</button>`:''}${!o.paid?`<button class="g" onclick="setO('${o.id}','paid',true)">Paid</button>`:''}<button class="g" onclick="openForm('${o.id}')">Edit</button></div></div></div>`).join(''):'<p class="m">No orders here yet. Tap “+ New order”.</p>')+
+ <div class="m">📍 ${esc(o.addr||'-')}</div>${o.drv||+o.dc?`<div class="m">🛵 ${esc(o.drv||'No delivery person')} · ${money(+o.dc||0)}</div>`:''}<div style="margin:6px 0">${esc(itemsTxt(o))}</div>${o.note?`<div class="m">📝 ${esc(o.note)}</div>`:''}
+ <div class="r" style="margin-top:8px"><div><span class="t ${o.st=='delivered'?'ok':'no'}">${o.st}</span><span class="t ${bal(o)>0?'no':'ok'}">${bal(o)>0?(paidOf(o)>0?'owes '+money(bal(o)):'unpaid'):'paid'}</span></div>
+ <div style="display:flex;gap:6px">${o.st=='pending'?`<button class="g" onclick="setO('${o.id}','st','delivered')">Delivered</button>`:''}${bal(o)>0?`<button class="g" onclick="payFull('${o.id}')">Paid</button>`:''}<button class="g" onclick="openForm('${o.id}')">Edit</button></div></div></div>`).join(''):'<p class="m">No orders here yet. Tap “+ New order”.</p>')+
  `<button class="fab" onclick="openForm()">+ New order</button>`;
 }
 function setO(id,k,v){db.orders.find(o=>o.id==id)[k]=v;save();render()}
 
-function openForm(id){const o=db.orders.find(x=>x.id==id);draft=o?JSON.parse(JSON.stringify(o)):{id:uid(),date:today(),name:'',phone:'',addr:'',items:[],note:'',fee:0,dc:0,st:'pending',paid:false};draft.isNew=!o;
+function openForm(id){const o=db.orders.find(x=>x.id==id);draft=o?JSON.parse(JSON.stringify(o)):{id:uid(),date:today(),name:'',phone:'',addr:'',items:[],note:'',fee:0,dc:0,st:'pending',paid:false,drv:'',dpaid:false,paidAmt:0};draft.isNew=!o;
  const q=i=>(draft.items.find(x=>x.id==i)||{q:0}).q;
  const rows=db.menu.filter(m=>m.on!==false).concat(draft.items.filter(i=>!db.menu.some(m=>m.id==i.id)).map(i=>({id:i.id,name:i.n,price:i.p})));
  const cs=custs();
@@ -83,25 +92,26 @@ function openForm(id){const o=db.orders.find(x=>x.id==id);draft=o?JSON.parse(JSO
  <textarea id="f_note" rows="2" placeholder="Customer notes (e.g. no onions, extra spicy)">${esc(draft.note)}</textarea>
  <h3>Money</h3><div class="g2"><div><div class="m">Delivery fee charged to customer</div><input id="f_fee" type="number" inputmode="decimal" value="${draft.fee||''}" oninput="upd()"></div>
  <div><div class="m">Delivery cost I pay</div><input id="f_dc" type="number" inputmode="decimal" value="${draft.dc||''}" oninput="upd()"></div></div>
+ <select id="f_drv"><option value="">Delivery person (none)</option>${drivers().map(n=>`<option ${n==draft.drv?'selected':''}>${esc(n)}</option>`).join('')}</select>
  <select id="f_st"><option value="pending">To deliver</option><option value="delivered">Delivered</option><option value="cancelled">Cancelled</option></select>
- <label class="r" style="justify-content:flex-start"><input type="checkbox" id="f_paid" style="width:auto" ${draft.paid?'checked':''}> Customer has paid</label>
+ <h3>Customer payment</h3><div class="r"><input id="f_pa" type="number" inputmode="decimal" placeholder="Amount paid so far" value="${paidOf(draft)||''}" oninput="upd()"><button class="g" style="white-space:nowrap" onclick="payAll()">Paid in full</button></div>
  <div class="c" id="sum"></div>
  <div class="bar r"><button class="g" onclick="closeForm()">Cancel</button>${o?`<button class="x" onclick="delO()">Delete</button>`:''}<button onclick="saveO()">Save order</button></div>`;
  $('#f_st').value=draft.st;$('#ov').style.display='block';upd();
 }
 function fill(w){const cs=custs(),v=w=='n'?$('#f_name').value:$('#f_phone').value;const c=cs.find(c=>(w=='n'?c.name:c.phone)==v);if(!c)return;if(w=='n'&&!$('#f_phone').value)$('#f_phone').value=c.phone;if(w=='p')$('#f_name').value=c.name;if(!$('#f_addr').value)$('#f_addr').value=c.addr||''}
 function step(id,d){let it=draft.items.find(i=>i.id==id);if(!it){const m=db.menu.find(m=>m.id==id);if(!m)return;it={id,n:m.name,p:m.price,q:0};draft.items.push(it)}it.q=Math.max(0,it.q+d);if(!it.q)draft.items=draft.items.filter(i=>i!==it);$('#q'+id).textContent=it.q;upd()}
-function upd(){const c=calc({items:draft.items,fee:$('#f_fee').value,dc:$('#f_dc').value});$('#sum').innerHTML=`<div class="r"><span>Food</span><span>${money(c.it)}</span></div><div class="r"><span>Delivery fee</span><span>${money(c.fee)}</span></div><div class="r big"><span>Customer pays</span><span>${money(c.rev)}</span></div><div class="r m"><span>After delivery cost</span><span>${money(c.pr)}</span></div>`}
+function upd(){const pa=+$('#f_pa').value||0;const c=calc({items:draft.items,fee:$('#f_fee').value,dc:$('#f_dc').value});$('#sum').innerHTML=`<div class="r"><span>Food</span><span>${money(c.it)}</span></div><div class="r"><span>Delivery fee</span><span>${money(c.fee)}</span></div><div class="r big"><span>Customer pays</span><span>${money(c.rev)}</span></div><div class="r"><span>Paid so far</span><span>${money(pa)}</span></div><div class="r b" style="color:${c.rev-pa>0?'#c33':'var(--ok)'}"><span>Balance owed</span><span>${money(Math.max(0,c.rev-pa))}</span></div><div class="r m"><span>After delivery cost</span><span>${money(c.pr)}</span></div>`}
 function saveO(){if(!draft.items.length){alert('Select at least one item.');return}const name=$('#f_name').value.trim(),phone=$('#f_phone').value.trim();if(!name&&!phone){alert('Enter a name or phone number.');return}
- Object.assign(draft,{name,phone,addr:$('#f_addr').value.trim(),date:$('#f_date').value||today(),note:$('#f_note').value.trim(),fee:+$('#f_fee').value||0,dc:+$('#f_dc').value||0,st:$('#f_st').value,paid:$('#f_paid').checked});
- const n=draft.isNew;delete draft.isNew;if(n)db.orders.push(draft);else db.orders[db.orders.findIndex(o=>o.id==draft.id)]=draft;save();closeForm()}
+ Object.assign(draft,{name,phone,addr:$('#f_addr').value.trim(),date:$('#f_date').value||today(),note:$('#f_note').value.trim(),fee:+$('#f_fee').value||0,dc:+$('#f_dc').value||0,st:$('#f_st').value,paidAmt:+$('#f_pa').value||0,drv:$('#f_drv').value.trim()});
+ draft.paid=bal(draft)<=0;const n=draft.isNew;delete draft.isNew;if(n)db.orders.push(draft);else db.orders[db.orders.findIndex(o=>o.id==draft.id)]=draft;save();closeForm()}
 function delO(){if(confirm('Delete this order?')){db.orders=db.orders.filter(o=>o.id!=draft.id);save();closeForm()}}
 function closeForm(){$('#ov').style.display='none';draft=null;render()}
 
 function vMenu(){return `<h2>Menu</h2><div class="c"><div class="m">Dish name · price</div>
  <div class="mr" style="margin-top:6px"><input id="m_n" placeholder="Dish name"><input id="m_p" type="number" inputmode="decimal" placeholder="Price"><button onclick="addM()">Add</button></div></div>`+
  db.menu.map(m=>`<div class="c"><div class="mr"><input value="${esc(m.name)}" onchange="upM('${m.id}','name',this.value)"><input type="number" inputmode="decimal" value="${m.price}" onchange="upM('${m.id}','price',+this.value)"><button class="x" onclick="delM('${m.id}')">✕</button></div>
- <label class="m"><input type="checkbox" style="width:auto" ${m.on!==false?'checked':''} onchange="upM('${m.id}','on',this.checked)"> Available today</label></div>`).join('')}
+ <label class="m"><input type="checkbox" style="width:auto" ${m.on!==false?'checked':''} onchange="upM('${m.id}','on',this.checked)"> Available today</label></div>`).join('')+drvMgr()}
 function addM(){const n=$('#m_n').value.trim();if(!n)return;db.menu.push({id:uid(),name:n,price:+$('#m_p').value||0,on:true});save();render()}
 function upM(id,k,v){db.menu.find(m=>m.id==id)[k]=v;save()}
 function delM(id){if(confirm('Remove from menu? Past orders keep their data.')){db.menu=db.menu.filter(m=>m.id!=id);save();render()}}
@@ -110,33 +120,36 @@ function vCust(){const l=custs();return `<h2>Customers</h2><p class="m">Ranked b
 
 const MET=['Cash','Mobile money','Bank','Owed / credit'];
 function rep(){
- const os=db.orders.filter(o=>o.st!='cancelled'&&inR(o.date,F.from,F.to)&&(!F.paid||(F.paid=='paid')==!!o.paid)&&(!F.cust||(o.phone||o.name.toLowerCase())==F.cust)&&(!F.item||o.items.some(i=>i.n==F.item)));
+ const os=db.orders.filter(o=>o.st!='cancelled'&&inR(o.date,F.from,F.to)&&(!F.paid||(F.paid=='paid')==(bal(o)<=0))&&(!F.cust||(o.phone||o.name.toLowerCase())==F.cust)&&(!F.drv||o.drv==F.drv)&&(!F.item||o.items.some(i=>i.n==F.item)));
  const ex=db.exp.filter(e=>inR(e.date,F.from,F.to));
- const R={n:os.length,it:0,fee:0,dc:0,unpaid:0,iq:0,is:0,items:{},cu:{},day:{},sp:{},os,exl:ex};
- os.forEach(o=>{const c=calc(o);R.it+=c.it;R.fee+=c.fee;R.dc+=c.dc;if(!o.paid)R.unpaid+=c.rev;
+ const R={n:os.length,it:0,fee:0,dc:0,unpaid:0,iq:0,is:0,items:{},cu:{},day:{},sp:{},drv:{},dowed:0,os,exl:ex};
+ os.forEach(o=>{const c=calc(o);R.it+=c.it;R.fee+=c.fee;R.dc+=c.dc;R.unpaid+=bal(o);if(+o.dc>0||o.drv){const k=o.drv||'',d=R.drv[k]||(R.drv[k]={n:0,t:0,owed:0});d.n++;d.t+=c.dc;d.owed+=c.dc;R.dowed+=c.dc}
   o.items.forEach(i=>{const x=R.items[i.n]||(R.items[i.n]={q:0,s:0});x.q+=i.q;x.s+=i.q*i.p;if(i.n==F.item){R.iq+=i.q;R.is+=i.q*i.p}});
   const k=o.name||o.phone,u=R.cu[k]||(R.cu[k]={n:0,s:0});u.n++;u.s+=c.rev;R.day[o.date]=(R.day[o.date]||0)+c.rev});
  ex.forEach(e=>{const k=e.label||'-';R.sp[k]=(R.sp[k]||0)+e.amt});
  R.ex=ex.reduce((a,e)=>a+e.amt,0);R.rev=R.it+R.fee;R.pr=R.rev-R.dc-R.ex;return R}
-function vRep(){const R=rep(),nar=F.item||F.cust;
+function vRep(){const R=rep(),nar=F.item||F.cust||F.drv;
  const pk=(PRE.find(([k])=>{const r=rng(k);return r[0]==F.from&&r[1]==F.to})||[''])[0];
  const names=[...new Set(db.orders.flatMap(o=>o.items.map(i=>i.n)))].sort();
  const sel=(id,opts,all)=>`<select onchange="F.${id}=this.value;render()"><option value="">${all}</option>${opts.map(([k,t])=>`<option value="${esc(k)}" ${k==F[id]?'selected':''}>${esc(t)}</option>`).join('')}</select>`;
  const top=(o,f,n)=>Object.entries(o).sort((a,b)=>f(b[1])-f(a[1])).slice(0,n);
  const rows=(a,fmt)=>{const mx=Math.max(1,...a.map(x=>x[2]));return a.length?a.map(([n,t,v])=>`<div style="margin:8px 0"><div class="r"><span>${esc(n)}</span><span class="m">${t}</span></div><div class="bar2"><div style="width:${Math.round(v/mx*100)}%"></div></div></div>`).join(''):'<span class="m">No data</span>'};
  const tile=(l,v)=>`<div class="c"><div class="m">${l}</div><div class="big">${v}</div></div>`;
+ const D=Object.entries(R.drv).sort((a,b)=>b[1].owed-a[1].owed);
+ const drvSec=F.drv?`<h3>Delivery to pay · ${esc(F.drv)}</h3><div class="c">${R.os.filter(o=>+o.dc>0).sort((a,b)=>b.date.localeCompare(a.date)).map(o=>`<div class="r" style="padding:6px 0"><div><div class="b">${esc(o.name||o.phone)}</div><div class="m">${o.date} · ${esc(itemsTxt(o))}</div></div><div style="text-align:right"><div class="b">${money(o.dc)}</div></div></div>`).join('')||'<span class="m">No delivery costs.</span>'}<div class="r b" style="margin-top:8px"><span>Total we owe</span><span>${money(R.dowed)}</span></div></div>`
+ :`<h3>Delivery persons</h3><div class="c">${D.length?D.map(([n,x])=>`<div class="r" style="padding:6px 0" ${n?`data-n="${esc(n)}" onclick="setD(this.dataset.n)"`:''}><div><div class="b">${esc(n||'Not assigned')}${n?' ›':''}</div><div class="m">${x.n} orders · total ${money(x.t)}</div></div><div class="b" style="color:#c33">we owe ${money(x.t)}</div></div>`).join(''):'<span class="m">No delivery costs yet.</span>'}</div>`;
  return `<h2>Reports</h2>
  <div class="chips">${PRE.map(([k,t])=>`<button class="${pk==k?'on':''}" onclick="setP('${k}')">${t}</button>`).join('')}</div>
  <div class="g2"><div><div class="m">From</div><input type="date" value="${F.from}" onchange="F.from=this.value;render()"></div><div><div class="m">To</div><input type="date" value="${F.to}" onchange="F.to=this.value;render()"></div></div>
  <div class="g2">${sel('item',names.map(n=>[n,n]),'All dishes')}${sel('cust',custs().map(c=>[c.key,c.name+(c.phone?' · '+c.phone:'')]),'All customers')}</div>
- ${sel('paid',[['paid','Paid only'],['unpaid','Unpaid only']],'Paid & unpaid')}
+ <div class="g2">${sel('paid',[['paid','Paid only'],['unpaid','Unpaid only']],'Paid & unpaid')}${sel('drv',drivers().map(n=>[n,n]),'All delivery persons')}</div>
  <div class="m" style="margin:8px 0">Showing: ${plabel()}${F.item?' · '+esc(F.item):''}${F.cust?' · one customer':''}</div>`+
- (nar?`<div class="g2">${tile('Orders',R.n)}${tile(F.item?'Sold (qty)':'Sales',F.item?R.iq:money(R.rev))}${F.item?tile('Sales of this dish',money(R.is)):''}${tile('Unpaid',money(R.unpaid))}</div>`
+ (nar?`<div class="g2">${tile('Orders',R.n)}${tile(F.item?'Sold (qty)':'Sales',F.item?R.iq:money(R.rev))}${F.item?tile('Sales of this dish',money(R.is)):''}${tile('Unpaid',money(R.unpaid))}${F.drv?tile('Delivery cost',money(R.dc))+tile('We owe driver',money(R.dowed)):''}</div>`
  :`<div class="c"><div class="m">Profit</div><div class="big" style="font-size:32px;color:${R.pr>=0?'var(--ok)':'#c33'}">${money(R.pr)}</div>
  <div class="r" style="margin-top:8px"><span>Sales (food + delivery fees)</span><span>${money(R.rev)}</span></div>
  <div class="r m"><span>− Delivery I paid</span><span>${money(R.dc)}</span></div><div class="r m"><span>− Money spent</span><span>${money(R.ex)}</span></div></div>
  <div class="g2">${tile('Orders',R.n)}${tile('Unpaid by customers',money(R.unpaid))}</div>`)+
- `<h3>Sales by day</h3><div class="c">${rows(Object.entries(R.day).sort((a,b)=>b[0].localeCompare(a[0])).slice(0,10).map(([d,v])=>[d,money(v),v]))}</div>
+ drvSec+`<h3>Sales by day</h3><div class="c">${rows(Object.entries(R.day).sort((a,b)=>b[0].localeCompare(a[0])).slice(0,10).map(([d,v])=>[d,money(v),v]))}</div>
  <h3>Dishes</h3><div class="c">${rows(top(R.items,x=>x.q,8).map(([n,x])=>[n,x.q+' sold · '+money(x.s),x.q]))}</div>`+
  (F.cust?'':`<h3>Top customers</h3><div class="c">${rows(top(R.cu,x=>x.n,6).map(([n,x])=>[n,x.n+' orders · '+money(x.s),x.n]))}</div>`)+
  (nar?'':`<h3>Spending by item</h3><div class="c">${rows(top(R.sp,x=>x,6).map(([n,v])=>[n,money(v),v]))}</div>`)+
@@ -159,7 +172,7 @@ async function dl(name,data){const f=new File([data],name,{type:data.type});
  try{if(navigator.canShare&&navigator.canShare({files:[f]})){await navigator.share({files:[f]});return}}catch(e){if(e.name=='AbortError')return}
  const a=document.createElement('a');a.href=URL.createObjectURL(f);a.download=name;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},4000)}
 const csv=rows=>'\ufeff'+rows.map(r=>r.map(v=>'"'+String(v??'').replace(/"/g,'""')+'"').join(',')).join('\r\n');
-function exOrders(){const R=rep();dl('orders-'+today()+'.csv',new Blob([csv([['Date','Customer','Phone','Address','Items','Notes','Food total','Delivery fee charged','Delivery paid','Profit','Status','Paid']].concat(R.os.map(o=>{const c=calc(o);return[o.date,o.name,o.phone,o.addr,itemsTxt(o),o.note,c.it,c.fee,c.dc,c.pr,o.st,o.paid?'yes':'no']})))],{type:'text/csv'}))}
+function exOrders(){const R=rep();dl('orders-'+today()+'.csv',new Blob([csv([['Date','Customer','Phone','Address','Items','Notes','Food total','Delivery fee charged','Delivery paid','Delivery person','Profit','Status','Amount paid','Balance owed']].concat(R.os.map(o=>{const c=calc(o);return[o.date,o.name,o.phone,o.addr,itemsTxt(o),o.note,c.it,c.fee,c.dc,o.drv||'',c.pr,o.st,paidOf(o),bal(o)]})))],{type:'text/csv'}))}
 function exCust(){dl('customers-'+today()+'.csv',new Blob([csv([['Rank','Name','Phone','Address','Orders','Total spent','Last order']].concat(custs().map((c,i)=>[i+1,c.name,c.phone,c.addr,c.n,c.sum,c.last])))],{type:'text/csv'}))}
 function exBackup(){dl('kitchen-backup-'+today()+'.json',new Blob([JSON.stringify(db)],{type:'application/json'}))}
 function restore(f){if(!f)return;const r=new FileReader();r.onload=()=>{try{const d=JSON.parse(r.result);if(!d.orders)throw 0;db={...db,...d};save();render();alert('Restored.')}catch(e){alert('Not a valid backup file.')}};r.readAsText(f)}
@@ -168,8 +181,8 @@ function exPdf(){const R=rep(),L=[],p=(a,b)=>L.push(b===undefined?a:a.padEnd(34)
  p('Orders',''+R.n);p('Food sales',money(R.it));p('Delivery fees charged',money(R.fee));p('Total sales',money(R.rev));p('Spent (ingredients etc.)',money(R.ex));p('Delivery paid',money(R.dc));p('PROFIT',money(R.pr));p('Unpaid by customers',money(R.unpaid));L.push('','TOP DISHES');
  Object.entries(R.items).sort((a,b)=>b[1].q-a[1].q).forEach(([n,x])=>p(' '+n.slice(0,30),x.q+' sold, '+money(x.s)));L.push('','CUSTOMERS');
  custs().forEach(c=>L.push((' '+c.name+' '+c.phone+' - '+c.n+' orders, '+money(c.sum)).slice(0,84)));L.push('','ORDERS');
- R.os.forEach(o=>L.push((o.date+' '+(o.name||o.phone)+': '+itemsTxt(o)+' = '+money(calc(o).rev)+(o.paid?'':' (unpaid)')).slice(0,84)));
- L.push('','MONEY SPENT');R.exl.forEach(e=>L.push((e.date+' '+e.label+': '+money(e.amt)).slice(0,84)));
+ R.os.forEach(o=>L.push((o.date+' '+(o.name||o.phone)+': '+itemsTxt(o)+' = '+money(calc(o).rev)+(bal(o)>0?' (owes '+money(bal(o))+')':'')).slice(0,84)));
+ L.push('','DELIVERY PERSONS');Object.entries(R.drv).forEach(([n,x])=>L.push(((n||'Not assigned')+': '+x.n+' orders, total '+money(x.t)+', we owe '+money(x.t)).slice(0,84)));L.push('','MONEY SPENT');R.exl.forEach(e=>L.push((e.date+' '+e.label+': '+money(e.amt)).slice(0,84)));
  dl('report-'+today()+'.pdf',new Blob([pdf(L)],{type:'application/pdf'}))}
 function pdf(lines){const pg=[];for(let i=0;i<lines.length;i+=50)pg.push(lines.slice(i,i+50));const off=[];let s='%PDF-1.4\n';const add=t=>{off.push(s.length);s+=off.length+' 0 obj\n'+t+'\nendobj\n'};
  add('<</Type/Catalog/Pages 2 0 R>>');add('<</Type/Pages/Kids['+pg.map((_,i)=>(4+i*2)+' 0 R').join(' ')+']/Count '+pg.length+'>>');add('<</Type/Font/Subtype/Type1/BaseFont/Courier>>');
